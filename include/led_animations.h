@@ -13,6 +13,10 @@
 #include "freertos/queue.h"
 #include "driver/rmt_tx.h"
 
+// Default configuration values
+#define LED_STRIP_DEFAULT_RESOLUTION_HZ 10000000  // 10MHz resolution
+#define LED_STRIP_DEFAULT_FRAME_DURATION_MS 20    // Default frame duration for animations
+
 // Animation command types
 typedef enum {
     LED_CMD_SET_COLOR, // Set all LEDs to a solid color
@@ -50,6 +54,7 @@ typedef struct {
     uint32_t resolution_hz; // RMT resolution (default: 10MHz)
     size_t mem_block_symbols; // RMT memory block size
     size_t trans_queue_depth; // RMT transaction queue depth
+    int frame_duration_ms;  // Frame duration for animations (default: 20ms)
 } led_animations_config_t;
 
 // Initialize the LED animation library

@@ -13,7 +13,7 @@
 
 #define EXAMPLE_GPIO_NUM      6
 #define EXAMPLE_LED_NUMBERS   15
-#define RMT_RESOLUTION_HZ     10000000
+#define EXAMPLE_RESOLUTION_HZ 10000000
 #define EXAMPLE_FRAME_DURATION_MS 20
 
 static const char *TAG = "main";
@@ -24,9 +24,10 @@ void app_main(void)
     led_animations_config_t config = {
         .gpio_num = EXAMPLE_GPIO_NUM,
         .led_count = EXAMPLE_LED_NUMBERS,
-        .resolution_hz = RMT_RESOLUTION_HZ,
+        .resolution_hz = EXAMPLE_RESOLUTION_HZ,
         .mem_block_symbols = 64,
-        .trans_queue_depth = 4
+        .trans_queue_depth = 4,
+        .frame_duration_ms = EXAMPLE_FRAME_DURATION_MS
     };
     if (led_animations_init(&config) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize LED animations");

@@ -20,21 +20,23 @@ static const char *TAG = "led_animations";
 static uint8_t *led_strip_pixels = NULL;
 static int led_count = 0;
 static QueueHandle_t led_command_queue = NULL;
+static uint32_t led_strip_resolution_hz = LED_STRIP_DEFAULT_RESOLUTION_HZ;
+static int frame_duration_ms = LED_STRIP_DEFAULT_FRAME_DURATION_MS;
 
-// WS2812 timing definitions
-static const rmt_symbol_word_t ws2812_zero = {
-    .level0 = 1, .duration0 = 0.3 * RMT_LED_STRIP_RESOLUTION_HZ / 1000000,
-    .level1 = 0, .duration1 = 0.9 * RMT_LED_STRIP_RESOLUTION_HZ / 1000000,
+// WS2812 timing definitions - will be updated during initialization
+static rmt_symbol_word_t ws2812_zero = {
+    .level0 = 1, .duration0 = 0,  // Will be set in init
+    .level1 = 0, .duration1 = 0,  // Will be set in init
 };
 
-static const rmt_symbol_word_t ws2812_one = {
-    .level0 = 1, .duration0 = 0.9 * RMT_LED_STRIP_RESOLUTION_HZ / 1000000,
-    .level1 = 0, .duration1 = 0.3 * RMT_LED_STRIP_RESOLUTION_HZ / 1000000,
+static rmt_symbol_word_t ws2812_one = {
+    .level0 = 1, .duration0 = 0,  // Will be set in init
+    .level1 = 0, .duration1 = 0,  // Will be set in init
 };
 
-static const rmt_symbol_word_t ws2812_reset = {
-    .level0 = 0, .duration0 = RMT_LED_STRIP_RESOLUTION_HZ / 1000000 * 50 / 2,
-    .level1 = 0, .duration1 = RMT_LED_STRIP_RESOLUTION_HZ / 1000000 * 50 / 2,
+static rmt_symbol_word_t ws2812_reset = {
+    .level0 = 0, .duration0 = 0,  // Will be set in init
+    .level1 = 0, .duration1 = 0,  // Will be set in init
 };
 
 // Encoder callback: Converts RGB data to RMT symbols
@@ -142,7 +144,7 @@ static void viper_animation(rmt_channel_handle_t led_chan, rmt_encoder_handle_t 
     bool completed_cycle = false;
 
     // Adjust frame duration based on speed
-    int adjusted_frame_ms = (int)(EXAMPLE_FRAME_DURATION_MS / speed);
+    int adjusted_frame_ms = (int)(frame_duration_ms / speed);
     float global_scale = global_brightness / 255.0f;
 
     while (repeat_count == 0 || current_repeat < repeat_count) {
@@ -203,7 +205,7 @@ static void led_task(void *arg)
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .gpio_num = (int)arg, // GPIO passed as task argument
         .mem_block_symbols = 64,
-        .resolution_hz = RMT_LED_STRIP_RESOLUTION_HZ,
+        .resolution_hz = led_strip_resolution_hz,
         .trans_queue_depth = 4,
     };
     ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_chan_config, &led_chan));
@@ -251,8 +253,23 @@ esp_err_t led_animations_init(const led_animations_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Allocate pixel buffer
+    // Store configuration values
     led_count = config->led_count;
+    led_strip_resolution_hz = config->resolution_hz;
+    frame_duration_ms = (config->frame_duration_ms > 0) ? 
+                        config->frame_duration_ms : LED_STRIP_DEFAULT_FRAME_DURATION_MS;
+    
+    // Update WS2812 timing based on resolution
+    ws2812_zero.duration0 = 0.3 * led_strip_resolution_hz / 1000000;
+    ws2812_zero.duration1 = 0.9 * led_strip_resolution_hz / 1000000;
+    
+    ws2812_one.duration0 = 0.9 * led_strip_resolution_hz / 1000000;
+    ws2812_one.duration1 = 0.3 * led_strip_resolution_hz / 1000000;
+    
+    ws2812_reset.duration0 = led_strip_resolution_hz / 1000000 * 50 / 2;
+    ws2812_reset.duration1 = led_strip_resolution_hz / 1000000 * 50 / 2;
+
+    // Allocate pixel buffer
     led_strip_pixels = malloc(led_count * 3);
     if (led_strip_pixels == NULL) {
         ESP_LOGE(TAG, "Failed to allocate pixel buffer");
