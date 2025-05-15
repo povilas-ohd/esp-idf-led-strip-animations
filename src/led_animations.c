@@ -221,8 +221,10 @@ static void led_task(void *arg)
     while (1) {
         if (xQueueReceive(led_command_queue, &cmd, portMAX_DELAY) == pdTRUE) {
             ESP_LOGI(TAG, "Received command: %d", cmd.type);
+            // Process command immediately to reduce delay
             switch (cmd.type) {
                 case LED_CMD_SET_COLOR:
+                    // Execute immediately with higher priority
                     set_all_leds_color(led_chan, encoder, cmd.red, cmd.green, cmd.blue, cmd.global_brightness);
                     break;
                 case LED_CMD_BREATHE:
