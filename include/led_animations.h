@@ -57,11 +57,14 @@ typedef struct {
     int frame_duration_ms;  // Frame duration for animations (default: 20ms)
 } led_animations_config_t;
 
-// Initialize the LED animation library
-// Returns ESP_OK on success, or an error code
-esp_err_t led_animations_init(const led_animations_config_t *config);
+// LED strip instance handle
+typedef struct led_strip_instance* led_strip_handle_t;
 
-// Send a command to the LED animation task
-void send_led_command(led_command_t cmd);
+// Initialize a LED strip instance
+// Returns handle on success, NULL on failure
+led_strip_handle_t led_animations_init(const led_animations_config_t *config);
+
+// Send a command to a specific LED strip instance
+void send_led_command(led_strip_handle_t handle, led_command_t cmd);
 
 #endif // LED_ANIMATIONS_H
