@@ -22,6 +22,7 @@ struct led_strip_instance {
     uint8_t *pixels;
     int led_count;
     QueueHandle_t command_queue;
+    SemaphoreHandle_t rmt_ready_sem;  // Signals when RMT channel allocated
     uint32_t resolution_hz;
     int frame_duration_ms;
     int gpio_num;
@@ -177,15 +178,23 @@ static void led_task(void *arg)
     rmt_channel_handle_t led_chan = NULL;
     rmt_encoder_handle_t encoder = NULL;
 
-    // Initialize RMT
+    // Initialize RMT with auto channel selection
     rmt_tx_channel_config_t tx_chan_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .gpio_num = instance->gpio_num,
         .mem_block_symbols = 64,
         .resolution_hz = instance->resolution_hz,
         .trans_queue_depth = 4,
+        .flags.with_dma = false,
     };
-    ESP_ERROR_CHECK(rmt_new_tx_channel(&tx_chan_config, &led_chan));
+    
+    // Try to allocate RMT channel - will auto-select next available
+    esp_err_t ret = rmt_new_tx_channel(&tx_chan_config, &led_chan);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "GPIO%d: Failed to allocate RMT channel: %s", instance->gpio_num, esp_err_to_name(ret));
+        vTaskDelete(NULL);
+        return;
+    }
 
     const rmt_simple_encoder_config_t simple_encoder_cfg = {
         .callback = encoder_callback,
@@ -194,6 +203,9 @@ static void led_task(void *arg)
     ESP_ERROR_CHECK(rmt_new_simple_encoder(&simple_encoder_cfg, &encoder));
 
     ESP_ERROR_CHECK(rmt_enable(led_chan));
+    
+    // Signal that RMT channel is allocated
+    xSemaphoreGive(instance->rmt_ready_sem);
 
     led_command_t cmd;
     while (1) {
@@ -276,6 +288,16 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
         free(instance);
         return NULL;
     }
+    
+    // Create semaphore for RMT ready signal
+    instance->rmt_ready_sem = xSemaphoreCreateBinary();
+    if (instance->rmt_ready_sem == NULL) {
+        ESP_LOGE(TAG, "Failed to create RMT ready semaphore");
+        vQueueDelete(instance->command_queue);
+        free(instance->pixels);
+        free(instance);
+        return NULL;
+    }
 
     // Start LED task
     char task_name[16];
@@ -289,6 +311,12 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
     }
 
     ESP_LOGI(TAG, "LED strip initialized on GPIO%d with %d LEDs", config->gpio_num, config->led_count);
+    
+    // Wait for RMT channel to be allocated by task (max 1 second)
+    if (xSemaphoreTake(instance->rmt_ready_sem, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Timeout waiting for RMT channel allocation on GPIO%d", config->gpio_num);
+    }
+    
     return instance;
 }
 
