@@ -50,6 +50,12 @@ esp_err_t led_gpio_set_color(led_gpio_handle_t handle, uint8_t r, uint8_t g, uin
     return led_strip_refresh(handle->strip);
 }
 
+esp_err_t led_gpio_set_pixel(led_gpio_handle_t handle, int index, uint8_t r, uint8_t g, uint8_t b) {
+    if (!handle || index >= handle->led_count) return ESP_ERR_INVALID_ARG;
+    led_strip_set_pixel(handle->strip, index, r, g, b);
+    return led_strip_refresh(handle->strip);
+}
+
 esp_err_t led_gpio_clear(led_gpio_handle_t handle) {
     if (!handle) return ESP_ERR_INVALID_ARG;
     return led_strip_clear(handle->strip);

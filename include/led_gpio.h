@@ -13,6 +13,9 @@ led_gpio_handle_t led_gpio_init(int gpio_num, int led_count);
 // Set all LEDs to RGB color
 esp_err_t led_gpio_set_color(led_gpio_handle_t handle, uint8_t r, uint8_t g, uint8_t b);
 
+// Set single LED to RGB color
+esp_err_t led_gpio_set_pixel(led_gpio_handle_t handle, int index, uint8_t r, uint8_t g, uint8_t b);
+
 // Clear all LEDs
 esp_err_t led_gpio_clear(led_gpio_handle_t handle);
 
