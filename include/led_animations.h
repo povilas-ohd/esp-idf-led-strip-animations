@@ -14,7 +14,7 @@
 #include "driver/rmt_tx.h"
 
 // Default configuration values
-#define LED_STRIP_DEFAULT_RESOLUTION_HZ 10000000  // 10MHz resolution
+#define LED_STRIP_DEFAULT_RESOLUTION_HZ 8000000   // 8MHz resolution (better for WS2812E)
 #define LED_STRIP_DEFAULT_FRAME_DURATION_MS 20    // Default frame duration for animations
 
 // Animation command types

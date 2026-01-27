@@ -255,16 +255,16 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
                                   config->frame_duration_ms : LED_STRIP_DEFAULT_FRAME_DURATION_MS;
     instance->gpio_num = config->gpio_num;
     
-    // Update WS2812 timing based on resolution
+    // Update WS2812E timing to match Adafruit NeoPixel library
     instance->ws2812_zero.level0 = 1;
-    instance->ws2812_zero.duration0 = 0.3 * instance->resolution_hz / 1000000;
+    instance->ws2812_zero.duration0 = 0.35 * instance->resolution_hz / 1000000;  // T0H: 0.35μs
     instance->ws2812_zero.level1 = 0;
-    instance->ws2812_zero.duration1 = 0.9 * instance->resolution_hz / 1000000;
+    instance->ws2812_zero.duration1 = 0.8 * instance->resolution_hz / 1000000;   // T0L: 0.8μs
     
     instance->ws2812_one.level0 = 1;
-    instance->ws2812_one.duration0 = 0.9 * instance->resolution_hz / 1000000;
+    instance->ws2812_one.duration0 = 0.7 * instance->resolution_hz / 1000000;    // T1H: 0.7μs
     instance->ws2812_one.level1 = 0;
-    instance->ws2812_one.duration1 = 0.3 * instance->resolution_hz / 1000000;
+    instance->ws2812_one.duration1 = 0.6 * instance->resolution_hz / 1000000;    // T1L: 0.6μs
     
     instance->ws2812_reset.level0 = 0;
     instance->ws2812_reset.duration0 = instance->resolution_hz / 1000000 * 50 / 2;
