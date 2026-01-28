@@ -14,7 +14,7 @@
 #include "driver/rmt_tx.h"
 
 // Default configuration values
-#define LED_STRIP_DEFAULT_RESOLUTION_HZ 8000000   // 8MHz resolution (better for WS2812E)
+#define LED_STRIP_DEFAULT_RESOLUTION_HZ 10000000  // 10MHz resolution
 #define LED_STRIP_DEFAULT_FRAME_DURATION_MS 20    // Default frame duration for animations
 
 // Animation command types
@@ -66,5 +66,11 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config);
 
 // Send a command to a specific LED strip instance
 void send_led_command(led_strip_handle_t handle, led_command_t cmd);
+
+// Update timing parameters for testing (expose internal function)
+void led_update_timing(led_strip_handle_t handle, float t0h, float t0l, float t1h, float t1l);
+
+// Test function for different timing configurations
+void led_timing_test_all_strips(led_strip_handle_t strip1, led_strip_handle_t strip2);
 
 #endif // LED_ANIMATIONS_H

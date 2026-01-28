@@ -255,16 +255,16 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
                                   config->frame_duration_ms : LED_STRIP_DEFAULT_FRAME_DURATION_MS;
     instance->gpio_num = config->gpio_num;
     
-    // Update WS2812E timing to match Adafruit NeoPixel library
+    // Update WS2812E timing based on resolution (WS2812E_Variant1 - tested working)
     instance->ws2812_zero.level0 = 1;
-    instance->ws2812_zero.duration0 = 0.35 * instance->resolution_hz / 1000000;  // T0H: 0.35μs
+    instance->ws2812_zero.duration0 = 0.4 * instance->resolution_hz / 1000000;   // T0H: 0.4μs
     instance->ws2812_zero.level1 = 0;
-    instance->ws2812_zero.duration1 = 0.8 * instance->resolution_hz / 1000000;   // T0L: 0.8μs
+    instance->ws2812_zero.duration1 = 0.85 * instance->resolution_hz / 1000000;  // T0L: 0.85μs
     
     instance->ws2812_one.level0 = 1;
-    instance->ws2812_one.duration0 = 0.7 * instance->resolution_hz / 1000000;    // T1H: 0.7μs
+    instance->ws2812_one.duration0 = 0.8 * instance->resolution_hz / 1000000;    // T1H: 0.8μs
     instance->ws2812_one.level1 = 0;
-    instance->ws2812_one.duration1 = 0.6 * instance->resolution_hz / 1000000;    // T1L: 0.6μs
+    instance->ws2812_one.duration1 = 0.45 * instance->resolution_hz / 1000000;   // T1L: 0.45μs
     
     instance->ws2812_reset.level0 = 0;
     instance->ws2812_reset.duration0 = instance->resolution_hz / 1000000 * 50 / 2;
@@ -332,4 +332,100 @@ void send_led_command(led_strip_handle_t handle, led_command_t cmd)
     if (xQueueSend(handle->command_queue, &cmd, pdMS_TO_TICKS(10)) != pdTRUE) {
         ESP_LOGE(TAG, "Failed to send command to LED queue");
     }
+}
+
+// Update timing parameters for testing different WS2812 variants
+void led_update_timing(led_strip_handle_t handle, float t0h, float t0l, float t1h, float t1l)
+{
+    if (handle == NULL) {
+        ESP_LOGE(TAG, "Invalid handle");
+        return;
+    }
+    
+    // Update timing parameters
+    handle->ws2812_zero.level0 = 1;
+    handle->ws2812_zero.duration0 = t0h * handle->resolution_hz / 1000000;
+    handle->ws2812_zero.level1 = 0;
+    handle->ws2812_zero.duration1 = t0l * handle->resolution_hz / 1000000;
+    
+    handle->ws2812_one.level0 = 1;
+    handle->ws2812_one.duration0 = t1h * handle->resolution_hz / 1000000;
+    handle->ws2812_one.level1 = 0;
+    handle->ws2812_one.duration1 = t1l * handle->resolution_hz / 1000000;
+    
+    ESP_LOGI(TAG, "GPIO%d: Updated timing T0H=%.2f T0L=%.2f T1H=%.2f T1L=%.2f", 
+             handle->gpio_num, t0h, t0l, t1h, t1l);
+}
+
+// Test different timing configurations
+void led_timing_test_all_strips(led_strip_handle_t strip1, led_strip_handle_t strip2)
+{
+    typedef struct {
+        const char *name;
+        float t0h, t0l, t1h, t1l;
+    } timing_config_t;
+    
+    static const timing_config_t timing_tests[] = {
+        {"WS2812B_Standard", 0.3, 0.9, 0.9, 0.3},
+        {"WS2812E_Variant1", 0.4, 0.85, 0.8, 0.45},
+        {"Adafruit_NeoPixel", 0.35, 0.8, 0.7, 0.6},
+        {"WS2812_Relaxed", 0.25, 1.0, 0.75, 0.5},
+        {"SK6812_Compatible", 0.3, 0.9, 0.6, 0.6},
+    };
+    
+    const int num_tests = sizeof(timing_tests) / sizeof(timing_tests[0]);
+    
+    ESP_LOGI(TAG, "\n\n=== LED TIMING TEST START ===");
+    ESP_LOGI(TAG, "Testing %d timing configurations on 2 LED strips", num_tests);
+    ESP_LOGI(TAG, "Strip 1: GPIO%d (%d LEDs)", strip1->gpio_num, strip1->led_count);
+    ESP_LOGI(TAG, "Strip 2: GPIO%d (%d LEDs)", strip2->gpio_num, strip2->led_count);
+    ESP_LOGI(TAG, "Watch BOTH strips and note which config makes BOTH work correctly\n");
+    
+    for (int test = 0; test < num_tests; test++) {
+        ESP_LOGI(TAG, "\n*** TEST %d/%d: %s ***", test+1, num_tests, timing_tests[test].name);
+        ESP_LOGI(TAG, "Timing: T0H=%.2fμs T0L=%.2fμs T1H=%.2fμs T1L=%.2fμs", 
+                 timing_tests[test].t0h, timing_tests[test].t0l,
+                 timing_tests[test].t1h, timing_tests[test].t1l);
+        
+        // Update timing for both strips
+        led_update_timing(strip1, timing_tests[test].t0h, timing_tests[test].t0l, 
+                         timing_tests[test].t1h, timing_tests[test].t1l);
+        led_update_timing(strip2, timing_tests[test].t0h, timing_tests[test].t0l, 
+                         timing_tests[test].t1h, timing_tests[test].t1l);
+        
+        ESP_LOGI(TAG, ">>> SHOWING RED on BOTH strips (3 seconds) <<<");
+        led_command_t red_cmd = {.type = LED_CMD_SET_COLOR, .red = 255, .green = 0, .blue = 0, .global_brightness = 50};
+        send_led_command(strip1, red_cmd);
+        send_led_command(strip2, red_cmd);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        
+        ESP_LOGI(TAG, ">>> SHOWING GREEN on BOTH strips (3 seconds) <<<");
+        led_command_t green_cmd = {.type = LED_CMD_SET_COLOR, .red = 0, .green = 255, .blue = 0, .global_brightness = 50};
+        send_led_command(strip1, green_cmd);
+        send_led_command(strip2, green_cmd);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        
+        ESP_LOGI(TAG, ">>> SHOWING BLUE on BOTH strips (3 seconds) <<<");
+        led_command_t blue_cmd = {.type = LED_CMD_SET_COLOR, .red = 0, .green = 0, .blue = 255, .global_brightness = 50};
+        send_led_command(strip1, blue_cmd);
+        send_led_command(strip2, blue_cmd);
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        
+        ESP_LOGI(TAG, ">>> TURNING OFF BOTH strips <<<");
+        led_command_t off_cmd = {.type = LED_CMD_SET_COLOR, .red = 0, .green = 0, .blue = 0, .global_brightness = 0};
+        send_led_command(strip1, off_cmd);
+        send_led_command(strip2, off_cmd);
+        
+        ESP_LOGI(TAG, "*** END TEST %d/%d: %s ***\n", test+1, num_tests, timing_tests[test].name);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+    }
+    
+    ESP_LOGI(TAG, "\n=== LED TIMING TEST COMPLETE ===");
+    ESP_LOGI(TAG, "RESULTS: Which configuration made BOTH strips show correct colors?");
+    ESP_LOGI(TAG, "1. WS2812B_Standard (0.3/0.9/0.9/0.3)");
+    ESP_LOGI(TAG, "2. WS2812E_Variant1 (0.4/0.85/0.8/0.45)");
+    ESP_LOGI(TAG, "3. Adafruit_NeoPixel (0.35/0.8/0.7/0.6)");
+    ESP_LOGI(TAG, "4. WS2812_Relaxed (0.25/1.0/0.75/0.5)");
+    ESP_LOGI(TAG, "5. SK6812_Compatible (0.3/0.9/0.6/0.6)");
+    ESP_LOGI(TAG, "Note the working configuration number for your strips!\n");
 }
