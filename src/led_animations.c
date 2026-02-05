@@ -182,7 +182,7 @@ static void led_task(void *arg)
     rmt_tx_channel_config_t tx_chan_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .gpio_num = instance->gpio_num,
-        .mem_block_symbols = 64,
+        .mem_block_symbols = 128,  // Increased from 64 for better stability
         .resolution_hz = instance->resolution_hz,
         .trans_queue_depth = 4,
         .flags.with_dma = false,
@@ -255,21 +255,22 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
                                   config->frame_duration_ms : LED_STRIP_DEFAULT_FRAME_DURATION_MS;
     instance->gpio_num = config->gpio_num;
     
-    // Update WS2812E timing based on resolution (WS2812E_Variant1 - tested working)
+    // WS2812_Precise_3 timing (tested working configuration)
     instance->ws2812_zero.level0 = 1;
-    instance->ws2812_zero.duration0 = 0.4 * instance->resolution_hz / 1000000;   // T0H: 0.4μs
+    instance->ws2812_zero.duration0 = (uint32_t)(0.360 * instance->resolution_hz / 1000000);  // T0H: 0.360μs
     instance->ws2812_zero.level1 = 0;
-    instance->ws2812_zero.duration1 = 0.85 * instance->resolution_hz / 1000000;  // T0L: 0.85μs
+    instance->ws2812_zero.duration1 = (uint32_t)(0.890 * instance->resolution_hz / 1000000);  // T0L: 0.890μs
     
     instance->ws2812_one.level0 = 1;
-    instance->ws2812_one.duration0 = 0.8 * instance->resolution_hz / 1000000;    // T1H: 0.8μs
+    instance->ws2812_one.duration0 = (uint32_t)(0.820 * instance->resolution_hz / 1000000);   // T1H: 0.820μs
     instance->ws2812_one.level1 = 0;
-    instance->ws2812_one.duration1 = 0.45 * instance->resolution_hz / 1000000;   // T1L: 0.45μs
+    instance->ws2812_one.duration1 = (uint32_t)(0.430 * instance->resolution_hz / 1000000);   // T1L: 0.430μs
     
+    // Reset pulse - standard 50μs (working configuration)
     instance->ws2812_reset.level0 = 0;
-    instance->ws2812_reset.duration0 = instance->resolution_hz / 1000000 * 50 / 2;
+    instance->ws2812_reset.duration0 = (uint32_t)(50.0 * instance->resolution_hz / 1000000);  // 50μs reset
     instance->ws2812_reset.level1 = 0;
-    instance->ws2812_reset.duration1 = instance->resolution_hz / 1000000 * 50 / 2;
+    instance->ws2812_reset.duration1 = (uint32_t)(50.0 * instance->resolution_hz / 1000000);  // 50μs reset
 
     // Allocate pixel buffer
     instance->pixels = malloc(instance->led_count * 3);
@@ -342,16 +343,16 @@ void led_update_timing(led_strip_handle_t handle, float t0h, float t0l, float t1
         return;
     }
     
-    // Update timing parameters
+    // Update timing parameters with explicit uint32_t casting for precision
     handle->ws2812_zero.level0 = 1;
-    handle->ws2812_zero.duration0 = t0h * handle->resolution_hz / 1000000;
+    handle->ws2812_zero.duration0 = (uint32_t)(t0h * handle->resolution_hz / 1000000);
     handle->ws2812_zero.level1 = 0;
-    handle->ws2812_zero.duration1 = t0l * handle->resolution_hz / 1000000;
+    handle->ws2812_zero.duration1 = (uint32_t)(t0l * handle->resolution_hz / 1000000);
     
     handle->ws2812_one.level0 = 1;
-    handle->ws2812_one.duration0 = t1h * handle->resolution_hz / 1000000;
+    handle->ws2812_one.duration0 = (uint32_t)(t1h * handle->resolution_hz / 1000000);
     handle->ws2812_one.level1 = 0;
-    handle->ws2812_one.duration1 = t1l * handle->resolution_hz / 1000000;
+    handle->ws2812_one.duration1 = (uint32_t)(t1l * handle->resolution_hz / 1000000);
     
     ESP_LOGI(TAG, "GPIO%d: Updated timing T0H=%.2f T0L=%.2f T1H=%.2f T1L=%.2f", 
              handle->gpio_num, t0h, t0l, t1h, t1l);
@@ -366,11 +367,12 @@ void led_timing_test_all_strips(led_strip_handle_t strip1, led_strip_handle_t st
     } timing_config_t;
     
     static const timing_config_t timing_tests[] = {
-        {"WS2812B_Standard", 0.3, 0.9, 0.9, 0.3},
-        {"WS2812E_Variant1", 0.4, 0.85, 0.8, 0.45},
-        {"Adafruit_NeoPixel", 0.35, 0.8, 0.7, 0.6},
-        {"WS2812_Relaxed", 0.25, 1.0, 0.75, 0.5},
-        {"SK6812_Compatible", 0.3, 0.9, 0.6, 0.6},
+        {"WS2812B_Standard", 0.300, 0.900, 0.900, 0.300},
+        {"WS2812E_Variant1", 0.350, 0.900, 0.795, 0.455},
+        {"WS2812_Precise_1", 0.320, 0.880, 0.780, 0.470},
+        {"WS2812_Precise_2", 0.340, 0.910, 0.800, 0.450},
+        {"WS2812_Precise_3", 0.360, 0.890, 0.820, 0.430},
+        {"SK6812_Compatible", 0.300, 0.900, 0.600, 0.600},
     };
     
     const int num_tests = sizeof(timing_tests) / sizeof(timing_tests[0]);
@@ -422,10 +424,11 @@ void led_timing_test_all_strips(led_strip_handle_t strip1, led_strip_handle_t st
     
     ESP_LOGI(TAG, "\n=== LED TIMING TEST COMPLETE ===");
     ESP_LOGI(TAG, "RESULTS: Which configuration made BOTH strips show correct colors?");
-    ESP_LOGI(TAG, "1. WS2812B_Standard (0.3/0.9/0.9/0.3)");
-    ESP_LOGI(TAG, "2. WS2812E_Variant1 (0.4/0.85/0.8/0.45)");
-    ESP_LOGI(TAG, "3. Adafruit_NeoPixel (0.35/0.8/0.7/0.6)");
-    ESP_LOGI(TAG, "4. WS2812_Relaxed (0.25/1.0/0.75/0.5)");
-    ESP_LOGI(TAG, "5. SK6812_Compatible (0.3/0.9/0.6/0.6)");
+    ESP_LOGI(TAG, "1. WS2812B_Standard (0.300/0.900/0.900/0.300)");
+    ESP_LOGI(TAG, "2. WS2812E_Variant1 (0.350/0.900/0.795/0.455)");
+    ESP_LOGI(TAG, "3. WS2812_Precise_1 (0.320/0.880/0.780/0.470)");
+    ESP_LOGI(TAG, "4. WS2812_Precise_2 (0.340/0.910/0.800/0.450)");
+    ESP_LOGI(TAG, "5. WS2812_Precise_3 (0.360/0.890/0.820/0.430)");
+    ESP_LOGI(TAG, "6. SK6812_Compatible (0.300/0.900/0.600/0.600)");
     ESP_LOGI(TAG, "Note the working configuration number for your strips!\n");
 }
