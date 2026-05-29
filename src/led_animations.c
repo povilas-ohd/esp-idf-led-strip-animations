@@ -26,6 +26,7 @@ struct led_strip_instance {
     uint32_t resolution_hz;
     int frame_duration_ms;
     int gpio_num;
+    size_t mem_block_symbols;         // RMT memory block size (from config)
     rmt_symbol_word_t ws2812_zero;
     rmt_symbol_word_t ws2812_one;
     rmt_symbol_word_t ws2812_reset;
@@ -178,11 +179,15 @@ static void led_task(void *arg)
     rmt_channel_handle_t led_chan = NULL;
     rmt_encoder_handle_t encoder = NULL;
 
-    // Initialize RMT with auto channel selection
+    // Initialize RMT with auto channel selection. Honor the caller's
+    // mem_block_symbols. ESP32-S3 has 4 TX channels × 48 symbols each;
+    // mem_block_symbols=128 claims 3 channels per strip and leaves NO
+    // room for the TMC2130 stepper. Caller in led_control.c passes 48
+    // (the per-channel quota) so each strip claims exactly 1 channel.
     rmt_tx_channel_config_t tx_chan_config = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .gpio_num = instance->gpio_num,
-        .mem_block_symbols = 128,  // Increased from 64 for better stability
+        .mem_block_symbols = instance->mem_block_symbols,
         .resolution_hz = instance->resolution_hz,
         .trans_queue_depth = 4,
         .flags.with_dma = false,
@@ -251,9 +256,13 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
 
     instance->led_count = config->led_count;
     instance->resolution_hz = config->resolution_hz;
-    instance->frame_duration_ms = (config->frame_duration_ms > 0) ? 
+    instance->frame_duration_ms = (config->frame_duration_ms > 0) ?
                                   config->frame_duration_ms : LED_STRIP_DEFAULT_FRAME_DURATION_MS;
     instance->gpio_num = config->gpio_num;
+    /* Honor caller's mem_block_symbols. Default 64 if not specified (one full
+     * channel on ESP32-S3 = 48 symbols; round up to caller's nominal). */
+    instance->mem_block_symbols = (config->mem_block_symbols > 0)
+        ? config->mem_block_symbols : 64;
     
     // WS2812_Precise_3 timing (tested working configuration)
     instance->ws2812_zero.level0 = 1;
