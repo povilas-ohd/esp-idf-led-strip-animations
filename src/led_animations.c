@@ -8,6 +8,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -23,6 +24,8 @@ struct led_strip_instance {
     int led_count;
     QueueHandle_t command_queue;
     SemaphoreHandle_t rmt_ready_sem;  // Signals when RMT channel allocated
+    SemaphoreHandle_t task_done_sem;
+    volatile bool rmt_failed;
     uint32_t resolution_hz;
     int frame_duration_ms;
     int gpio_num;
@@ -110,7 +113,9 @@ static void breathe_leds(led_strip_handle_t instance, rmt_channel_handle_t led_c
         rmt_transmit_config_t tx_config = { .loop_count = 0 };
         ESP_ERROR_CHECK(rmt_transmit(led_chan, encoder, instance->pixels, instance->led_count * 3, &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
-        vTaskDelay(pdMS_TO_TICKS(adjusted_duration_ms / steps));
+        if (xQueuePeek(instance->command_queue, &new_cmd, pdMS_TO_TICKS(adjusted_duration_ms / steps)) == pdTRUE) {
+            return;
+        }
 
         step = (step + 1) % steps;
         if (step == 0 && repeat_count > 0) {
@@ -152,7 +157,9 @@ static void viper_animation(led_strip_handle_t instance, rmt_channel_handle_t le
         rmt_transmit_config_t tx_config = { .loop_count = 0 };
         ESP_ERROR_CHECK(rmt_transmit(led_chan, encoder, instance->pixels, instance->led_count * 3, &tx_config));
         ESP_ERROR_CHECK(rmt_tx_wait_all_done(led_chan, portMAX_DELAY));
-        vTaskDelay(pdMS_TO_TICKS(adjusted_frame_ms));
+        if (xQueuePeek(instance->command_queue, &new_cmd, pdMS_TO_TICKS(adjusted_frame_ms)) == pdTRUE) {
+            return;
+        }
 
         pos += direction;
         if (pos >= instance->led_count + tail_length) {
@@ -197,6 +204,8 @@ static void led_task(void *arg)
     esp_err_t ret = rmt_new_tx_channel(&tx_chan_config, &led_chan);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "GPIO%d: Failed to allocate RMT channel: %s", instance->gpio_num, esp_err_to_name(ret));
+        instance->rmt_failed = true;
+        xSemaphoreGive(instance->rmt_ready_sem);
         vTaskDelete(NULL);
         return;
     }
@@ -234,6 +243,14 @@ static void led_task(void *arg)
                 case LED_CMD_STOP:
                     set_all_leds_color(instance, led_chan, encoder, 0, 0, 0, 255);
                     break;
+                case LED_CMD_SHUTDOWN:
+                    set_all_leds_color(instance, led_chan, encoder, 0, 0, 0, 255);
+                    rmt_disable(led_chan);
+                    rmt_del_encoder(encoder);
+                    rmt_del_channel(led_chan);
+                    xSemaphoreGive(instance->task_done_sem);
+                    vTaskDelete(NULL);
+                    return;
                 default:
                     ESP_LOGE(TAG, "Unknown command: %d", cmd.type);
             }
@@ -255,6 +272,7 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
     }
 
     instance->led_count = config->led_count;
+    instance->rmt_failed = false;
     instance->resolution_hz = config->resolution_hz;
     instance->frame_duration_ms = (config->frame_duration_ms > 0) ?
                                   config->frame_duration_ms : LED_STRIP_DEFAULT_FRAME_DURATION_MS;
@@ -309,11 +327,23 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
         return NULL;
     }
 
+    instance->task_done_sem = xSemaphoreCreateBinary();
+    if (instance->task_done_sem == NULL) {
+        ESP_LOGE(TAG, "Failed to create task done semaphore");
+        vSemaphoreDelete(instance->rmt_ready_sem);
+        vQueueDelete(instance->command_queue);
+        free(instance->pixels);
+        free(instance);
+        return NULL;
+    }
+
     // Start LED task
     char task_name[16];
     snprintf(task_name, sizeof(task_name), "led_task_%d", config->gpio_num);
     if (xTaskCreate(led_task, task_name, 4096, instance, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "Failed to create LED task");
+        vSemaphoreDelete(instance->task_done_sem);
+        vSemaphoreDelete(instance->rmt_ready_sem);
         vQueueDelete(instance->command_queue);
         free(instance->pixels);
         free(instance);
@@ -325,9 +355,44 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config)
     // Wait for RMT channel to be allocated by task (max 1 second)
     if (xSemaphoreTake(instance->rmt_ready_sem, pdMS_TO_TICKS(1000)) != pdTRUE) {
         ESP_LOGE(TAG, "Timeout waiting for RMT channel allocation on GPIO%d", config->gpio_num);
+    } else if (instance->rmt_failed) {
+        vSemaphoreDelete(instance->task_done_sem);
+        vSemaphoreDelete(instance->rmt_ready_sem);
+        vQueueDelete(instance->command_queue);
+        free(instance->pixels);
+        free(instance);
+        return NULL;
     }
     
     return instance;
+}
+
+// Stop a LED strip instance and free its task, RMT channel and memory
+esp_err_t led_animations_deinit(led_strip_handle_t handle)
+{
+    if (handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    led_command_t cmd = { .type = LED_CMD_SHUTDOWN };
+    send_led_command(handle, cmd);
+    if (xSemaphoreTake(handle->task_done_sem, pdMS_TO_TICKS(LED_STRIP_DEINIT_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGE(TAG, "GPIO%d: LED task did not stop", handle->gpio_num);
+        return ESP_ERR_TIMEOUT;
+    }
+
+    vSemaphoreDelete(handle->task_done_sem);
+    vSemaphoreDelete(handle->rmt_ready_sem);
+    vQueueDelete(handle->command_queue);
+    free(handle->pixels);
+    ESP_LOGI(TAG, "GPIO%d: LED strip deinitialized", handle->gpio_num);
+    free(handle);
+    return ESP_OK;
+}
+
+int led_animations_get_count(led_strip_handle_t handle)
+{
+    return handle ? handle->led_count : 0;
 }
 
 // Send a command to a specific LED strip instance

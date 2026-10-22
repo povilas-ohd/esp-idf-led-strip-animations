@@ -16,13 +16,15 @@
 // Default configuration values
 #define LED_STRIP_DEFAULT_RESOLUTION_HZ 10000000  // 10MHz resolution (reverted from 20MHz)
 #define LED_STRIP_DEFAULT_FRAME_DURATION_MS 20    // Default frame duration for animations
+#define LED_STRIP_DEINIT_TIMEOUT_MS 500
 
 // Animation command types
 typedef enum {
     LED_CMD_SET_COLOR, // Set all LEDs to a solid color
     LED_CMD_BREATHE,   // Breathing effect (fade in/out)
     LED_CMD_VIPER,     // Moving head with fading tail
-    LED_CMD_STOP       // Turn off all LEDs
+    LED_CMD_STOP,      // Turn off all LEDs
+    LED_CMD_SHUTDOWN   // Clear, free the RMT channel and end the task
 } led_command_type_t;
 
 // Breathing mode types
@@ -66,6 +68,13 @@ led_strip_handle_t led_animations_init(const led_animations_config_t *config);
 
 // Send a command to a specific LED strip instance
 void send_led_command(led_strip_handle_t handle, led_command_t cmd);
+
+// Stop a LED strip instance and free everything it owns
+// On ESP_ERR_TIMEOUT the handle stays valid
+esp_err_t led_animations_deinit(led_strip_handle_t handle);
+
+// Number of LEDs the instance drives
+int led_animations_get_count(led_strip_handle_t handle);
 
 // Update timing parameters for testing (expose internal function)
 void led_update_timing(led_strip_handle_t handle, float t0h, float t0l, float t1h, float t1l);
